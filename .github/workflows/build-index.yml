@@ -59,22 +59,6 @@ jobs:
       - name: Build GitHub Pages
         run: node scripts/build.js --pages
 
-      - name: Commit and push registry + docs
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add registry.json docs/
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
-          git commit -m "Auto-build registry index and pages"
-          # Rebase onto remote in case someone else pushed meanwhile
-          git pull --rebase origin main
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
