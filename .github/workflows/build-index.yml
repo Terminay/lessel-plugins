@@ -3,6 +3,9 @@ name: Build Registry Index & Deploy Pages
 on:
   push:
     branches: [main]
+    paths:
+      - 'plugins/**'
+      - 'scripts/**'
   workflow_dispatch:
 
 permissions:
