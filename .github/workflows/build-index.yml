@@ -7,19 +7,19 @@ on:
       - 'plugins/**'
       - 'scripts/**'
 
-# Grant write permissions for both pushing changes and deploying Pages
 permissions:
   contents: write
   pages: write
   id-token: write
 
-# Allow only one concurrent build
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
   build-and-deploy:
+    # Skip running if the last commit was made by the GitHub Actions bot
+    if: github.actor != 'github-actions[bot]'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -27,7 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Need full history for git push
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -55,6 +54,20 @@ jobs:
 
       - name: Build registry.json
         run: node scripts/build.js
+
+      - name: Commit and Push registry.json
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@://github.com"
+          
+          # Only commit if registry.json actually changed
+          if ! git diff --exit-code registry.json; then
+            git add registry.json
+            git commit -m "chore: automated registry index update [skip ci]"
+            git push origin main
+          else
+            echo "No changes to registry.json"
+          fi
 
       - name: Build GitHub Pages
         run: node scripts/build.js --pages
