@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-13T09:49:25.824Z",
+  "generated": "2026-07-13T09:50:34.404Z",
   "totalPlugins": 1,
   "plugins": [
     {
@@ -21,19 +21,19 @@
       "latestVersion": "1.0.0",
       "versions": {
         "1.0.0": {
-          "checksum": "sha256:ae61ea804cdc9eba28cb74ca1bca1f3e2730233a025b92ed0462e049e5b8b6d7",
-          "published": "2026-07-12",
-          "size": 741,
+          "checksum": "sha256:3d0d642c7ea74d437c5f2814bfa48f72674885c26b5554b94e26043f3df4c863",
+          "published": "2026-07-13",
+          "size": 722,
           "readme": null
         }
       },
       "totalVersions": 1,
-      "totalDownloads": 4658,
-      "createdAt": "2026-07-12",
-      "updatedAt": "2026-07-12",
-      "trendingScore": 622,
+      "totalDownloads": 3663,
+      "createdAt": "2026-07-13",
+      "updatedAt": "2026-07-13",
+      "trendingScore": 453,
       "icon": null,
-      "readme": "<h1>example-logger</h1>\r\n\r\nLogs all matched messages with a custom prefix to help you debug your lessel pipeline.\r\n\r\n<h2>Install</h2>\r\n\r\n``<code>bash\r\nlessel plugin install example-logger\r\n</code>`<code>\r\n\r\n<h2>Usage</h2>\r\n\r\nAdd </code>example-logger<code> to your </code>lessel.config.json<code> plugins list. It will log every message that matches its schema.\r\n\r\n<h2>Configuration</h2>\r\n\r\n<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>\r</thead><tbody>\r\n<tr><td></code>prefix<code></td><td></code>string<code></td><td></code>[example-logger]<code></td><td>Log line prefix</td></tr>\r\n<tr><td></code>includePayload<code></td><td></code>boolean<code></td><td></code>true`</td><td>Include full event payload in logs</td></tr></tbody></table>\r\n\r\n<h2>License</h2>\r\n\r\nMIT"
+      "readme": "<h1>example-logger</h1>\n<p>Logs all matched messages with a custom prefix to help you debug your lessel pipeline.</p>\n<h2>Install</h2>\n<pre><code class=\"language-bash\">lessel plugin install example-logger</code></pre>\n<h2>Usage</h2>\n<p>Add <code>example-logger</code> to your <code>lessel.config.json</code> plugins list. It will log every message that matches its schema.</p>\n<h2>Configuration</h2>\n<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr></thead><tbody>\n<tr><td><code>prefix</code></td><td><code>string</code></td><td><code>[example-logger]</code></td><td>Log line prefix</td></tr>\n<tr><td><code>includePayload</code></td><td><code>boolean</code></td><td><code>true</code></td><td>Include full event payload in logs</td></tr></tbody></table>\n<h2>License</h2>\n<p>MIT</p>"
     }
   ]
 }
