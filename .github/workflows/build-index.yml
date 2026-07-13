@@ -1,4 +1,4 @@
-name: Build Registry Index
+name: Build Registry Index & Deploy Pages
 
 on:
   push:
@@ -7,12 +7,29 @@ on:
       - 'plugins/**'
       - 'scripts/**'
 
+# Grant write permissions for both pushing changes and deploying Pages
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# Allow only one concurrent build
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
-  build:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+        with:
+          # Need full history for git push
+          fetch-depth: 0
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -22,12 +39,12 @@ jobs:
         run: |
           echo "Validating plugin structure..."
           for dir in plugins/*/; do
+            [ -d "$dir" ] || continue
             name=$(basename "$dir")
             if [ ! -f "$dir/plugin.json" ]; then
               echo "❌ $name: missing plugin.json"
               exit 1
             fi
-            # Check at least one version directory
             versions=$(find "$dir" -maxdepth 1 -type d -name '[0-9]*.[0-9]*.[0-9]*' | wc -l)
             if [ "$versions" -eq 0 ]; then
               echo "❌ $name: no version directories (e.g. 1.0.0/)"
@@ -42,7 +59,7 @@ jobs:
       - name: Build GitHub Pages
         run: node scripts/build.js --pages
 
-      - name: Commit and push
+      - name: Commit and push registry + docs
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -53,3 +70,17 @@ jobs:
             git commit -m "Auto-build registry index and pages"
             git push
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
