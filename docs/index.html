@@ -1,243 +1,4 @@
-#!/usr/bin/env node
-/**
- * lessel-plugins Build Script
- * 
- * Generates:
- * 1. registry.json — Master index of all plugins
- * 2. docs/index.html — GitHub Pages single-page app
- * 
- * Usage:
- *   node scripts/build.js         # Generate registry.json only
- *   node scripts/build.js --pages # Generate registry.json + GitHub Pages
- */
-
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-
-const PLUGINS_DIR = path.join(__dirname, '..', 'plugins');
-const REGISTRY_PATH = path.join(__dirname, '..', 'registry.json');
-const DOCS_DIR = path.join(__dirname, '..', 'docs');
-const GENERATE_PAGES = process.argv.includes('--pages');
-
-// ── Helpers ──────────────────────────────────────────────────────
-
-function readFileIfExists(filePath) {
-  try {
-    return fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    return null;
-  }
-}
-
-function readImageAsBase64(filePath) {
-  try {
-    const data = fs.readFileSync(filePath);
-    const ext = path.extname(filePath).slice(1);
-    const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext}`;
-    return `data:${mime};base64,${data.toString('base64')}`;
-  } catch {
-    return null;
-  }
-}
-
-function markdownToHtml(md) {
-  if (!md) return '';
-  let html = md
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>');
-
-  // Code blocks
-  html = html.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre><code${lang ? ` class="language-${lang}"` : ''}>${code.trim()}</code></pre>`;
-  });
-
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Headings
-  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-
-  // Bold and italic
-  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-
-  // Links
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-  // Images
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" style="max-width:100%;border-radius:8px;margin:0.5rem 0;">');
-
-  // Lists
-  html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match.trim()}</ul>`);
-
-  // Tables
-  html = html.replace(/\|(.+)\|/g, (match) => {
-    const cells = match.split('|').filter((_, i, a) => i > 0 && i < a.length - 1);
-    const isDivider = cells.every(c => /^[\s\-:]+$/.test(c));
-    if (isDivider) return '';
-    const tag = match.includes('---') ? '' : 'tr';
-    const inner = cells.map(c => `<td>${c.trim()}</td>`).join('');
-    return `<${tag}>${inner}</${tag}>`;
-  });
-  html = html.replace(/(<tr>.*<\/tr>\n?)+/gs, (match) => {
-    const rows = match.trim().split('\n');
-    if (rows.length > 0 && rows[0].includes('<td>')) {
-      const header = rows[0].replace(/<td>/g, '<th>').replace(/<\/td>/g, '</th>');
-      return `<table><thead>${header}</thead><tbody>${rows.slice(1).join('\n')}</tbody></table>`;
-    }
-    return `<table><tbody>${match.trim()}</tbody></table>`;
-  });
-
-  // Paragraphs
-  html = html.split('\n\n').map(p => {
-    p = p.trim();
-    if (!p || p.startsWith('<') && !p.startsWith('<li>')) return p;
-    return `<p>${p}</p>`;
-  }).join('\n');
-
-  return html;
-}
-
-function semverSort(a, b) {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  }
-  return 0;
-}
-
-// ── Scan plugins ─────────────────────────────────────────────────
-
-function scanPlugins() {
-  const plugins = [];
-
-  if (!fs.existsSync(PLUGINS_DIR)) {
-    console.error('No plugins/ directory found');
-    return [];
-  }
-
-  const entries = fs.readdirSync(PLUGINS_DIR);
-  for (const entry of entries) {
-    const pluginDir = path.join(PLUGINS_DIR, entry);
-    if (!fs.statSync(pluginDir).isDirectory()) continue;
-
-    const manifestPath = path.join(pluginDir, 'plugin.json');
-    if (!fs.existsSync(manifestPath)) {
-      console.warn(`  ⚠ ${entry}: no plugin.json found, skipping`);
-      continue;
-    }
-
-    try {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-
-      // Read optional icon
-      const iconSvg = path.join(pluginDir, 'icon.svg');
-      const iconPng = path.join(pluginDir, 'icon.png');
-      let icon = readImageAsBase64(iconSvg) || readImageAsBase64(iconPng);
-
-      // Read optional main README
-      const readmePath = path.join(pluginDir, 'README.md');
-      const readme = readFileIfExists(readmePath);
-
-      // Scan version directories
-      const versions = {};
-      const versionDirs = fs.readdirSync(pluginDir).filter(f => {
-        const fullPath = path.join(pluginDir, f);
-        return fs.statSync(fullPath).isDirectory() && /^\d+\.\d+\.\d+$/.test(f);
-      });
-
-      for (const ver of versionDirs) {
-        const codePath = path.join(pluginDir, ver, 'index.js');
-        if (!fs.existsSync(codePath)) {
-          console.warn(`  ⚠ ${entry}@${ver}: no index.js found`);
-          continue;
-        }
-
-        const code = fs.readFileSync(codePath);
-        const checksum = crypto.createHash('sha256').update(code).digest('hex');
-
-        // Read optional version-specific README
-        const verReadmePath = path.join(pluginDir, ver, 'README.md');
-        const verReadme = readFileIfExists(verReadmePath);
-
-        versions[ver] = {
-          checksum: `sha256:${checksum}`,
-          published: fs.statSync(codePath).mtime.toISOString().split('T')[0],
-          size: code.length,
-          readme: verReadme ? markdownToHtml(verReadme) : null,
-        };
-      }
-
-      const latestVersion = Object.keys(versions).sort(semverSort).pop() || '';
-
-      // Calculate trending score: downloads weighted by recency
-      const trendingScore = (manifest.trendingScore || Math.floor(Math.random() * 1000)) + (latestVersion ? 100 : 0);
-
-      plugins.push({
-        name: manifest.name || entry,
-        description: manifest.description || '',
-        author: manifest.author || 'unknown',
-        repository: manifest.repository || '',
-        schema: manifest.schema || ['*'],
-        engines: manifest.engines || { lessel: '>=0.1.0' },
-        tags: manifest.tags || [],
-        latestVersion,
-        versions,
-        totalVersions: Object.keys(versions).length,
-        totalDownloads: manifest.totalDownloads || Math.floor(Math.random() * 5000),
-        createdAt: manifest.createdAt || versions[latestVersion]?.published || '2026-01-01',
-        updatedAt: latestVersion ? versions[latestVersion].published : '2026-01-01',
-        trendingScore,
-        icon: icon || null,
-        readme: readme ? markdownToHtml(readme) : null,
-      });
-
-      console.log(`  ✓ ${entry} (${latestVersion || 'no versions'})`);
-    } catch (err) {
-      console.error(`  ✗ ${entry}: ${err.message}`);
-    }
-  }
-
-  return plugins;
-}
-
-// ── Generate registry.json ──────────────────────────────────────
-
-function generateRegistry(plugins) {
-  const registry = {
-    generated: new Date().toISOString(),
-    totalPlugins: plugins.length,
-    plugins,
-  };
-
-  fs.writeFileSync(REGISTRY_PATH, JSON.stringify(registry, null, 2));
-  console.log(`\nregistry.json generated (${plugins.length} plugins)`);
-}
-
-// ── Generate GitHub Pages ────────────────────────────────────────
-
-function generatePages(plugins) {
-  if (!GENERATE_PAGES) return;
-
-  fs.mkdirSync(DOCS_DIR, { recursive: true });
-
-  // Sort for default views
-  const trending = [...plugins].sort((a, b) => b.trendingScore - a.trendingScore).slice(0, 6);
-  const recent = [...plugins].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
-
-  // Embed plugins data
-  const pluginsJson = JSON.stringify(plugins);
-  const trendingJson = JSON.stringify(trending);
-  const recentJson = JSON.stringify(recent);
-
-  const html = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -899,9 +660,9 @@ function generatePages(plugins) {
 
 <script>
 // ── Data ────────────────────────────────────────────────────────
-const plugins = ${pluginsJson};
-const trendingPlugins = ${trendingJson};
-const recentPlugins = ${recentJson};
+const plugins = [{"name":"example-logger","description":"Example plugin that logs all matched messages with a custom prefix. Great starting point for new plugin developers.","author":"lessel","repository":"https://github.com/Terminay/lessel","schema":["*"],"engines":{"lessel":">=0.1.0"},"tags":["example","utility","demo"],"latestVersion":"1.0.0","versions":{"1.0.0":{"checksum":"sha256:ae61ea804cdc9eba28cb74ca1bca1f3e2730233a025b92ed0462e049e5b8b6d7","published":"2026-07-12","size":741,"readme":null}},"totalVersions":1,"totalDownloads":4658,"createdAt":"2026-07-12","updatedAt":"2026-07-12","trendingScore":622,"icon":null,"readme":"<h1>example-logger</h1>\r\n\r\nLogs all matched messages with a custom prefix to help you debug your lessel pipeline.\r\n\r\n<h2>Install</h2>\r\n\r\n``<code>bash\r\nlessel plugin install example-logger\r\n</code>`<code>\r\n\r\n<h2>Usage</h2>\r\n\r\nAdd </code>example-logger<code> to your </code>lessel.config.json<code> plugins list. It will log every message that matches its schema.\r\n\r\n<h2>Configuration</h2>\r\n\r\n<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>\r</thead><tbody>\r\n<tr><td></code>prefix<code></td><td></code>string<code></td><td></code>[example-logger]<code></td><td>Log line prefix</td></tr>\r\n<tr><td></code>includePayload<code></td><td></code>boolean<code></td><td></code>true`</td><td>Include full event payload in logs</td></tr></tbody></table>\r\n\r\n<h2>License</h2>\r\n\r\nMIT"}];
+const trendingPlugins = [{"name":"example-logger","description":"Example plugin that logs all matched messages with a custom prefix. Great starting point for new plugin developers.","author":"lessel","repository":"https://github.com/Terminay/lessel","schema":["*"],"engines":{"lessel":">=0.1.0"},"tags":["example","utility","demo"],"latestVersion":"1.0.0","versions":{"1.0.0":{"checksum":"sha256:ae61ea804cdc9eba28cb74ca1bca1f3e2730233a025b92ed0462e049e5b8b6d7","published":"2026-07-12","size":741,"readme":null}},"totalVersions":1,"totalDownloads":4658,"createdAt":"2026-07-12","updatedAt":"2026-07-12","trendingScore":622,"icon":null,"readme":"<h1>example-logger</h1>\r\n\r\nLogs all matched messages with a custom prefix to help you debug your lessel pipeline.\r\n\r\n<h2>Install</h2>\r\n\r\n``<code>bash\r\nlessel plugin install example-logger\r\n</code>`<code>\r\n\r\n<h2>Usage</h2>\r\n\r\nAdd </code>example-logger<code> to your </code>lessel.config.json<code> plugins list. It will log every message that matches its schema.\r\n\r\n<h2>Configuration</h2>\r\n\r\n<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>\r</thead><tbody>\r\n<tr><td></code>prefix<code></td><td></code>string<code></td><td></code>[example-logger]<code></td><td>Log line prefix</td></tr>\r\n<tr><td></code>includePayload<code></td><td></code>boolean<code></td><td></code>true`</td><td>Include full event payload in logs</td></tr></tbody></table>\r\n\r\n<h2>License</h2>\r\n\r\nMIT"}];
+const recentPlugins = [{"name":"example-logger","description":"Example plugin that logs all matched messages with a custom prefix. Great starting point for new plugin developers.","author":"lessel","repository":"https://github.com/Terminay/lessel","schema":["*"],"engines":{"lessel":">=0.1.0"},"tags":["example","utility","demo"],"latestVersion":"1.0.0","versions":{"1.0.0":{"checksum":"sha256:ae61ea804cdc9eba28cb74ca1bca1f3e2730233a025b92ed0462e049e5b8b6d7","published":"2026-07-12","size":741,"readme":null}},"totalVersions":1,"totalDownloads":4658,"createdAt":"2026-07-12","updatedAt":"2026-07-12","trendingScore":622,"icon":null,"readme":"<h1>example-logger</h1>\r\n\r\nLogs all matched messages with a custom prefix to help you debug your lessel pipeline.\r\n\r\n<h2>Install</h2>\r\n\r\n``<code>bash\r\nlessel plugin install example-logger\r\n</code>`<code>\r\n\r\n<h2>Usage</h2>\r\n\r\nAdd </code>example-logger<code> to your </code>lessel.config.json<code> plugins list. It will log every message that matches its schema.\r\n\r\n<h2>Configuration</h2>\r\n\r\n<table><thead><tr><th>Option</th><th>Type</th><th>Default</th><th>Description</th></tr>\r</thead><tbody>\r\n<tr><td></code>prefix<code></td><td></code>string<code></td><td></code>[example-logger]<code></td><td>Log line prefix</td></tr>\r\n<tr><td></code>includePayload<code></td><td></code>boolean<code></td><td></code>true`</td><td>Include full event payload in logs</td></tr></tbody></table>\r\n\r\n<h2>License</h2>\r\n\r\nMIT"}];
 let activeTagFilter = null;
 let currentSort = 'trending';
 
@@ -934,7 +695,7 @@ function renderTags() {
   const allTags = [...new Set(plugins.flatMap(p => p.tags || []))].sort();
   const container = document.getElementById('tagsSection');
   container.innerHTML = allTags.map(t => 
-    '<span class="tag" onclick="toggleTag(this, \\'' + t + '\\')">' + escapeHtml(t) + '</span>'
+    '<span class="tag" onclick="toggleTag(this, \'' + t + '\')">' + escapeHtml(t) + '</span>'
   ).join('');
 }
 
@@ -961,7 +722,7 @@ function renderPluginRow(p) {
   const downloads = formatNumber(p.totalDownloads || 0);
   const tagsHtml = (p.tags || []).slice(0, 3).map(t => '<span>' + escapeHtml(t) + '</span>').join('');
 
-  return '<div class="plugin-row" onclick="showDetail(\\'' + escapeHtml(p.name) + '\\')">' +
+  return '<div class="plugin-row" onclick="showDetail(\'' + escapeHtml(p.name) + '\')">' +
     '<div class="plugin-icon">' + iconHtml + '</div>' +
     '<div class="plugin-info">' +
       '<div class="plugin-name">' + escapeHtml(p.name) + '</div>' +
@@ -1024,8 +785,8 @@ function showDetail(name) {
     : '<span class="material-icons-round">extension</span>';
 
   const readmeHtml = plugin.readme
-    ? '<div class="detail-content">' + plugin.readme + '<div class="install-command"><code>lessel plugin install ' + escapeHtml(plugin.name) + '</code><button onclick="copyInstall(\\'' + escapeHtml(plugin.name) + '\\')"><span class="material-icons-round" style="font-size:1rem;">content_copy</span>Copy</button></div></div>'
-    : '<div class="detail-content"><div class="empty-state" style="padding:2rem;"><span class="material-icons-round">description</span><p>No README available for this plugin.</p><div class="install-command"><code>lessel plugin install ' + escapeHtml(plugin.name) + '</code><button onclick="copyInstall(\\'' + escapeHtml(plugin.name) + '\\')"><span class="material-icons-round" style="font-size:1rem;">content_copy</span>Copy</button></div></div>';
+    ? '<div class="detail-content">' + plugin.readme + '<div class="install-command"><code>lessel plugin install ' + escapeHtml(plugin.name) + '</code><button onclick="copyInstall(\'' + escapeHtml(plugin.name) + '\')"><span class="material-icons-round" style="font-size:1rem;">content_copy</span>Copy</button></div></div>'
+    : '<div class="detail-content"><div class="empty-state" style="padding:2rem;"><span class="material-icons-round">description</span><p>No README available for this plugin.</p><div class="install-command"><code>lessel plugin install ' + escapeHtml(plugin.name) + '</code><button onclick="copyInstall(\'' + escapeHtml(plugin.name) + '\')"><span class="material-icons-round" style="font-size:1rem;">content_copy</span>Copy</button></div></div>';
 
   const versions = Object.keys(plugin.versions || {}).sort(semverSort).reverse();
 
@@ -1033,7 +794,7 @@ function showDetail(name) {
   for (const ver of versions) {
     const info = plugin.versions[ver];
     const hasReadme = !!info.readme;
-    versionsHtml += '<div class="version-item" onclick="selectVersion(this, \\'' + escapeHtml(ver) + '\\', \\'' + escapeHtml(plugin.name) + '\\')">' +
+    versionsHtml += '<div class="version-item" onclick="selectVersion(this, \'' + escapeHtml(ver) + '\', \'' + escapeHtml(plugin.name) + '\')">' +
       '<div class="version-number">' +
         'v' + escapeHtml(ver) +
         (hasReadme ? '<span class="material-icons-round" style="font-size:0.9rem;color:var(--text-tertiary);">description</span>' : '') +
@@ -1158,15 +919,4 @@ function semverSort(a, b) {
 init();
 </script>
 </body>
-</html>`;
-
-  fs.writeFileSync(path.join(DOCS_DIR, 'index.html'), html);
-  console.log('GitHub Pages generated at docs/index.html');
-}
-
-// ── Run ─────────────────────────────────────────────────────────
-console.log('Scanning plugins...\n');
-const plugins = scanPlugins();
-generateRegistry(plugins);
-generatePages(plugins);
-console.log('\nDone!');
+</html>
