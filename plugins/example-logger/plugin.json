@@ -1,0 +1,12 @@
+{
+  "name": "example-logger",
+  "description": "Example plugin that logs all matched messages with a custom prefix. Great starting point for new plugin developers.",
+  "author": "lessel",
+  "repository": "https://github.com/Terminay/lessel",
+  "schema": ["*"],
+  "engines": { "lessel": ">=0.1.0" },
+  "tags": ["example", "utility", "demo"],
+  "versions": {
+    "1.0.0": { "published": "2026-07-12" }
+  }
+}

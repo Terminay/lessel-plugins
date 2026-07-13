@@ -1,0 +1,55 @@
+name: Build Registry Index
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/**'
+      - 'scripts/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Validate plugin structure
+        run: |
+          echo "Validating plugin structure..."
+          for dir in plugins/*/; do
+            name=$(basename "$dir")
+            if [ ! -f "$dir/plugin.json" ]; then
+              echo "❌ $name: missing plugin.json"
+              exit 1
+            fi
+            # Check at least one version directory
+            versions=$(find "$dir" -maxdepth 1 -type d -name '[0-9]*.[0-9]*.[0-9]*' | wc -l)
+            if [ "$versions" -eq 0 ]; then
+              echo "❌ $name: no version directories (e.g. 1.0.0/)"
+              exit 1
+            fi
+            echo "✓ $name validated"
+          done
+
+      - name: Build registry.json
+        run: node scripts/build.js
+
+      - name: Build GitHub Pages
+        run: node scripts/build.js --pages
+
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add registry.json docs/
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Auto-build registry index and pages"
+            git push
+          fi
