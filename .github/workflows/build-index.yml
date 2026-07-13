@@ -66,10 +66,12 @@ jobs:
           git add registry.json docs/
           if git diff --staged --quiet; then
             echo "No changes to commit"
-          else
-            git commit -m "Auto-build registry index and pages"
-            git push
+            exit 0
           fi
+          git commit -m "Auto-build registry index and pages"
+          # Rebase onto remote in case someone else pushed meanwhile
+          git pull --rebase origin main
+          git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
